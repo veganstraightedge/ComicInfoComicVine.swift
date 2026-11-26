@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+
+  pull_request:
+
+jobs:
+  test-macos:
+    name: Test on macOS
+    runs-on: xcode-27
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Show system info
+        run: |
+          sw_vers
+          uname -m
+
+      - name: Cache Swift dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-swift-${{ hashFiles('**/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-
+
+      - name: Build package
+        run: swift build --configuration release
+
+      - name: Run tests on macOS
+        run: swift test --parallel
+
+  build-ios:
+    name: Build for iOS
+    runs-on: xcode-27
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build library for iOS
+        run: xcodebuild -scheme ComicInfoComicVine -destination "generic/platform=iOS" build
+
+  lint:
+    name: Code Formatting
+    runs-on: xcode-27
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check code formatting
+        run: swift format lint --strict --recursive Sources Tests
+
+  package-validation:
+    name: Package Validation
+    runs-on: xcode-27
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Describe package structure
+        run: swift package describe --type json
+
+      - name: Test package resolution
+        run: swift package resolve
+
+      - name: Show resolved dependencies
+        run: swift package show-dependencies
+
+      - name: Test debug build
+        run: swift build --configuration debug
+
+      - name: Test release build
+        run: swift build --configuration release
+
+      - name: Validate package exports
+        run: |
+          echo "Validating package structure..."
+
+          # Build only the library target to ensure it compiles
+          swift build --target ComicInfo --configuration release
+
+          # Verify the library builds successfully
+          if [ $? -eq 0 ]; then
+            echo "✅ ComicInfo library builds successfully"
+          else
+            echo "❌ ComicInfo library failed to build"
+            exit 1
+          fi
+
+          # Simple validation that source files exist and contain expected exports
+          if grep -r "public enum ComicInfo" Sources/; then
+            echo "✅ ComicInfo namespace exported"
+          else
+            echo "❌ ComicInfo namespace not found"
+            exit 1
+          fi
+
+          if grep -r "public struct Issue" Sources/; then
+            echo "✅ Issue type exported"
+          else
+            echo "❌ Issue type not found"
+            exit 1
+          fi
+
+          if grep -r "public struct Page" Sources/; then
+            echo "✅ Page type exported"
+          else
+            echo "❌ Page type not found"
+            exit 1
+          fi
+
+          if grep -r "public static func load" Sources/; then
+            echo "✅ load function exported"
+          else
+            echo "❌ load function not found"
+            exit 1
+          fi
+
+          echo "✅ Package validation completed successfully"
+          echo "   - Library builds without errors"
+          echo "   - Core types are properly exported"
